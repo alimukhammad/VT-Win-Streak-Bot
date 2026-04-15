@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VT Trading Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="header">
+        <div>
+          <p class="eyebrow">Paper Trading Dashboard</p>
+          <h1>VT Win Streak Bot</h1>
+          <p class="subtle">
+            Rule: Buy when Price &gt; MA20, Sell when Price &lt; MA20. Consecutive wins multiply share size by 1.5x.
+          </p>
+        </div>
+        <button id="toggle-btn" class="toggle-btn">Start Trading</button>
+      </section>
+
+      <section class="grid">
+        <article class="card balance-card">
+          <p class="label">Account Balance</p>
+          <p id="account-balance" class="value">$0.00</p>
+          <p id="cash-balance" class="subtle">Cash: $0.00</p>
+        </article>
+
+        <article class="card streak-card">
+          <p class="label">Current Share Size</p>
+          <p id="share-size" class="value addictive">0.00</p>
+          <p id="win-streak" class="subtle">Win Streak: 0</p>
+        </article>
+
+        <article class="card">
+          <p class="label">Win / Loss</p>
+          <p id="win-loss" class="value">0 / 0</p>
+          <p id="last-pnl" class="subtle">Last Trade PnL: $0.00</p>
+        </article>
+
+        <article class="card">
+          <p class="label">Signal</p>
+          <p id="signal" class="value">WAITING</p>
+          <p id="position" class="subtle">Position: 0.00 shares</p>
+        </article>
+
+        <article class="card">
+          <p class="label">Market</p>
+          <p id="price" class="value">$0.00</p>
+          <p id="ma20" class="subtle">MA20: $0.00</p>
+        </article>
+
+        <article class="card status-card">
+          <p class="label">System</p>
+          <p id="running-status" class="value stopped">STOPPED</p>
+          <p id="meta" class="subtle">Data: uninitialized | Paper: true</p>
+          <p id="warning" class="warning"></p>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      let running = false;
+
+      const money = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 2,
+      });
+
+      function fmtMoney(v) {
+        const n = Number(v ?? 0);
+        return money.format(Number.isFinite(n) ? n : 0);
+      }
+
+      function fmtNum(v, digits = 2) {
+        const n = Number(v ?? 0);
+        return Number.isFinite(n) ? n.toFixed(digits) : "0.00";
+      }
+
+      function updateButtonState() {
+        const btn = document.getElementById("toggle-btn");
+        btn.textContent = running ? "Stop Trading" : "Start Trading";
+        btn.classList.toggle("running", running);
+      }
+
+      async function callApi(path) {
+        const res = await fetch(path, { method: "POST" });
+        if (!res.ok) {
+          throw new Error(`API error: ${res.status}`);
+        }
+      }
+
+      async function toggleTrading() {
+        const btn = document.getElementById("toggle-btn");
+        btn.disabled = true;
+        try {
+          if (running) {
+            await callApi("/api/stop");
+          } else {
+            await callApi("/api/start");
+          }
+          await fetchStatus();
+        } catch (err) {
+          console.error(err);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      async function fetchStatus() {
+        const res = await fetch("/api/status");
+        const data = await res.json();
+
+        running = Boolean(data.running);
+        updateButtonState();
+
+        document.getElementById("account-balance").textContent = fmtMoney(data.account_balance);
+        document.getElementById("cash-balance").textContent = `Cash: ${fmtMoney(data.cash_balance)}`;
+
+        const shareSizeEl = document.getElementById("share-size");
+        shareSizeEl.textContent = fmtNum(data.current_share_size, 4);
+        shareSizeEl.classList.toggle("boosted", Number(data.current_share_size) > Number(data.base_share_size));
+        document.getElementById("win-streak").textContent = `Win Streak: ${data.win_streak ?? 0}`;
+
+        document.getElementById("win-loss").textContent = `${data.wins ?? 0} / ${data.losses ?? 0}`;
+        document.getElementById("last-pnl").textContent = `Last Trade PnL: ${fmtMoney(data.last_trade_pnl)}`;
+
+        document.getElementById("signal").textContent = data.last_signal ?? "WAITING";
+        document.getElementById("position").textContent = `Position: ${fmtNum(data.position_shares, 4)} shares`;
+
+        document.getElementById("price").textContent = fmtMoney(data.last_price);
+        document.getElementById("ma20").textContent = `MA20: ${fmtMoney(data.ma20)}`;
+
+        const statusEl = document.getElementById("running-status");
+        statusEl.textContent = running ? "RUNNING" : "STOPPED";
+        statusEl.classList.toggle("running", running);
+        statusEl.classList.toggle("stopped", !running);
+
+        document.getElementById("meta").textContent =
+          `Data: ${data.data_source ?? "unknown"} | Paper: ${Boolean(data.paper_trading)}`;
+
+        document.getElementById("warning").textContent = data.last_error || "";
+      }
+
+      document.getElementById("toggle-btn").addEventListener("click", toggleTrading);
+      fetchStatus();
+      setInterval(fetchStatus, 3000);
+    </script>
+  </body>
+</html>
